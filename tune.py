@@ -136,7 +136,7 @@ def create_qlora_config(
 
 def load_model_and_tokenizer(
     model_name: str,
-    use_4bit: bool = True,
+    use_4bit: bool = False,
     use_flash_attention: bool = True
 ):
     """Load model and tokenizer with quantization."""
@@ -306,4 +306,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
