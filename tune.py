@@ -42,31 +42,50 @@ def load_jsonl(path: str) -> List[Dict]:
     return data
 
 
+#def format_conversation(messages: List[Dict], tokenizer) -> str:
+#    """Format conversation for training."""
+#    # Build text manually to handle system/user/tool/assistant pattern
+#    text_parts = []
+#    
+#    for msg in messages:
+#        role = msg.get("role")
+#        content = msg.get("content", "").strip()
+#        
+#        if not content:
+#            continue
+#        
+#        # Format based on role
+#        if role == "system":
+#            text_parts.append(f"[INST] {content} [/INST]")
+#        elif role == "user":
+#            text_parts.append(f"[INST] {content} [/INST]")
+#        elif role == "tool":
+#            # Tool results as continuation of conversation
+#            text_parts.append(content)
+#        elif role == "assistant":
+#            text_parts.append(content)
+#    
+#    return "\n".join(text_parts)
 def format_conversation(messages: List[Dict], tokenizer) -> str:
     """Format conversation for training."""
-    # Build text manually to handle system/user/tool/assistant pattern
-    text_parts = []
-    
+    # Filter/convert tool messages - Mistral template doesn't support them
+    formatted_messages = []
     for msg in messages:
-        role = msg.get("role")
-        content = msg.get("content", "").strip()
-        
-        if not content:
-            continue
-        
-        # Format based on role
-        if role == "system":
-            text_parts.append(f"[INST] {content} [/INST]")
-        elif role == "user":
-            text_parts.append(f"[INST] {content} [/INST]")
-        elif role == "tool":
-            # Tool results as continuation of conversation
-            text_parts.append(content)
-        elif role == "assistant":
-            text_parts.append(content)
+        if msg.get("role") == "tool":
+            # Append tool output to previous assistant message
+            if formatted_messages and formatted_messages[-1]["role"] == "assistant":
+                formatted_messages[-1]["content"] += "\n" + msg["content"]
+            else:
+                # Or treat as assistant continuation
+                formatted_messages.append({"role": "assistant", "content": msg["content"]})
+        else:
+            formatted_messages.append(msg)
     
-    return "\n".join(text_parts)
-
+    return tokenizer.apply_chat_template(
+        formatted_messages,
+        tokenize=False,
+        add_generation_prompt=False
+    )
 
 def preprocess_function(examples: Dict, tokenizer, max_length: int = 8192) -> Dict:
     """Tokenize and prepare training examples."""
@@ -287,3 +306,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
