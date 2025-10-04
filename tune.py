@@ -105,7 +105,7 @@ def preprocess_function(examples: Dict, tokenizer, max_length: int = 8192) -> Di
     )
     
     # For causal LM, labels are the same as input_ids
-    # tokenized["labels"] = tokenized["input_ids"].copy()
+    tokenized["labels"] = tokenized["input_ids"].copy()
     
     return tokenized
 
@@ -136,7 +136,7 @@ def create_qlora_config(
 
 def load_model_and_tokenizer(
     model_name: str,
-    use_4bit: bool = False,
+    use_4bit: bool = True,
     use_flash_attention: bool = True
 ):
     """Load model and tokenizer with quantization."""
@@ -306,5 +306,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
