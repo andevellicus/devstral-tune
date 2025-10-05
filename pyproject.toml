@@ -16,3 +16,6 @@ dependencies = [
     "torch>=2.8.0",
     "transformers>=4.57.0",
 ]
+
+[tool.uv.extra-build-dependencies]
+flash-attn = ["torch"]
