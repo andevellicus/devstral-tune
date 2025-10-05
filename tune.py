@@ -9,10 +9,15 @@ Usage:
         --train-data organized_traces/splits/train.jsonl \
         --val-data organized_traces/splits/val.jsonl \
         --model-name mistralai/Devstral-small-2505 \
+        --tokenizer-name mistralai/Mistral-Small-3.1-24B-Base-2503 \
         --output-dir ./devstral-finetuned \
         --epochs 3 \
         --batch-size 1 \
-        --gradient-accumulation 8
+        --gradient-accumulation 8 \
+        --max-length 16384 \
+        --lora-r 128 \
+        --lora-alpha 16 \
+        --use-flash-attention
 """
 
 import argparse
@@ -357,3 +362,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
