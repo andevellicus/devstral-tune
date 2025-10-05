@@ -8,6 +8,7 @@ Usage:
     python finetune_devstral.py \
         --train-data organized_traces/splits/train.jsonl \
         --val-data organized_traces/splits/val.jsonl \
+        --model-name mistralai/Devstral-small-2505 \
         --output-dir ./devstral-finetuned \
         --epochs 3 \
         --batch-size 1 \
@@ -150,6 +151,7 @@ def create_qlora_config(
 
 def load_model_and_tokenizer(
     model_name: str,
+    tokenizer_name: Optional[str] = None,
     use_4bit: bool = True,
     use_flash_attention: bool = True
 ):
@@ -166,13 +168,13 @@ def load_model_and_tokenizer(
     else:
         bnb_config = None
     
-    # Workaround for Devstral tokenizer issues - use ungated Mistral tokenizer
-    tokenizer_name = model_name
-    if "Devstral" in model_name or "devstral" in model_name.lower():
-        print("Using Mistral-7B tokenizer for Devstral model (same vocab)...")
-        tokenizer_name = "mistralai/Mistral-7B-Instruct-v0.1"
+    # Use separate tokenizer if specified (e.g., base model tokenizer for fine-tuned models)
+    if tokenizer_name is None:
+        tokenizer_name = model_name
     
-    # Load tokenizer
+    print(f"Loading tokenizer from: {tokenizer_name}")
+    
+    # Load tokenizer - should work fine with the base model
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_name,
         trust_remote_code=True,
@@ -181,6 +183,8 @@ def load_model_and_tokenizer(
     
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    
+    print(f"Tokenizer vocab size: {len(tokenizer)}")
     
     # Load model
     model_kwargs = {
@@ -192,6 +196,7 @@ def load_model_and_tokenizer(
     if use_flash_attention:
         model_kwargs["attn_implementation"] = "flash_attention_2"
     
+    print(f"Loading model from: {model_name}")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         **model_kwargs
@@ -239,7 +244,9 @@ def main():
     parser.add_argument("--train-data", required=True, help="Training JSONL file")
     parser.add_argument("--val-data", required=True, help="Validation JSONL file")
     parser.add_argument("--model-name", default="mistralai/Mistral-Small-3.1-24B", 
-                       help="Base model name")
+                       help="Base model name (e.g., mistralai/Devstral-Small-2507)")
+    parser.add_argument("--tokenizer-name", default=None,
+                       help="Tokenizer model name (defaults to model-name). Use base model for fine-tuned models.")
     parser.add_argument("--output-dir", default="./devstral-finetuned", 
                        help="Output directory")
     parser.add_argument("--epochs", type=int, default=3)
@@ -269,6 +276,7 @@ def main():
     print("Loading model and tokenizer...")
     model, tokenizer = load_model_and_tokenizer(
         args.model_name,
+        tokenizer_name=args.tokenizer_name,
         use_flash_attention=args.use_flash_attention
     )
     
