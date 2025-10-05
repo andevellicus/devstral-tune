@@ -42,72 +42,86 @@ def load_jsonl(path: str) -> List[Dict]:
     return data
 
 
-#def format_conversation(messages: List[Dict], tokenizer) -> str:
-#    """Format conversation for training."""
-#    # Build text manually to handle system/user/tool/assistant pattern
-#    text_parts = []
-#    
-#    for msg in messages:
-#        role = msg.get("role")
-#        content = msg.get("content", "").strip()
-#        
-#        if not content:
-#            continue
-#        
-#        # Format based on role
-#        if role == "system":
-#            text_parts.append(f"[INST] {content} [/INST]")
-#        elif role == "user":
-#            text_parts.append(f"[INST] {content} [/INST]")
-#        elif role == "tool":
-#            # Tool results as continuation of conversation
-#            text_parts.append(content)
-#        elif role == "assistant":
-#            text_parts.append(content)
-#    
-#    return "\n".join(text_parts)
-def format_conversation(messages: List[Dict], tokenizer) -> str:
-    """Format conversation for training."""
-    # Filter/convert tool messages - Mistral template doesn't support them
-    formatted_messages = []
-    for msg in messages:
-        if msg.get("role") == "tool":
-            # Append tool output to previous assistant message
-            if formatted_messages and formatted_messages[-1]["role"] == "assistant":
-                formatted_messages[-1]["content"] += "\n" + msg["content"]
-            else:
-                # Or treat as assistant continuation
-                formatted_messages.append({"role": "assistant", "content": msg["content"]})
-        else:
-            formatted_messages.append(msg)
+def format_conversation(messages: List[Dict], tokenizer, max_length: int = 8192) -> Dict:
+    """
+    Format conversation for training with loss only on assistant responses.
+    Preserves XML structure (<python>, <memory>, etc.) from traces.
+    """
+    input_ids = []
+    labels = []
     
-    return tokenizer.apply_chat_template(
-        formatted_messages,
-        tokenize=False,
-        add_generation_prompt=False
-    )
+    for i, msg in enumerate(messages):
+        role = msg.get("role")
+        content = msg.get("content", "").strip()
+        
+        if not content:
+            continue
+        
+        if role == "system":
+            # System prompt: include in context, no loss
+            if i == 0:  # First message
+                tokens = tokenizer.encode(f"<s>[INST] {content} [/INST]", add_special_tokens=False)
+            else:
+                tokens = tokenizer.encode(f"[INST] {content} [/INST]", add_special_tokens=False)
+            input_ids.extend(tokens)
+            labels.extend([-100] * len(tokens))
+            
+        elif role == "user":
+            # User message: include in context, no loss
+            tokens = tokenizer.encode(f"[INST] {content} [/INST]", add_special_tokens=False)
+            input_ids.extend(tokens)
+            labels.extend([-100] * len(tokens))
+            
+        elif role == "tool":
+            # Tool execution results: include in context, no loss
+            tokens = tokenizer.encode(f"\n{content}\n", add_special_tokens=False)
+            input_ids.extend(tokens)
+            labels.extend([-100] * len(tokens))
+            
+        elif role == "assistant":
+            # Assistant response: compute loss on this
+            # Preserve XML structure like <python>...</python>
+            tokens = tokenizer.encode(content, add_special_tokens=False)
+            
+            # Add EOS if this is the last message or before a user message
+            is_last = (i == len(messages) - 1)
+            next_is_user = (i + 1 < len(messages) and messages[i + 1].get("role") == "user")
+            
+            if is_last or next_is_user:
+                tokens.append(tokenizer.eos_token_id)
+            
+            input_ids.extend(tokens)
+            labels.extend(tokens)  # Train on assistant outputs
+    
+    # Truncate if needed
+    if len(input_ids) > max_length:
+        input_ids = input_ids[:max_length]
+        labels = labels[:max_length]
+    
+    return {
+        "input_ids": input_ids,
+        "labels": labels,
+        "attention_mask": [1] * len(input_ids)
+    }
+
 
 def preprocess_function(examples: Dict, tokenizer, max_length: int = 8192) -> Dict:
     """Tokenize and prepare training examples."""
-    conversations = []
+    all_input_ids = []
+    all_labels = []
+    all_attention_masks = []
     
     for messages in examples["messages"]:
-        formatted = format_conversation(messages, tokenizer)
-        conversations.append(formatted)
+        formatted = format_conversation(messages, tokenizer, max_length)
+        all_input_ids.append(formatted["input_ids"])
+        all_labels.append(formatted["labels"])
+        all_attention_masks.append(formatted["attention_mask"])
     
-    # Tokenize
-    tokenized = tokenizer(
-        conversations,
-        truncation=True,
-        max_length=max_length,
-        padding=False,
-        return_tensors=None
-    )
-    
-    # For causal LM, labels are the same as input_ids
-    tokenized["labels"] = tokenized["input_ids"].copy()
-    
-    return tokenized
+    return {
+        "input_ids": all_input_ids,
+        "labels": all_labels,
+        "attention_mask": all_attention_masks
+    }
 
 
 def create_qlora_config(
@@ -190,6 +204,36 @@ def load_model_and_tokenizer(
     return model, tokenizer
 
 
+@dataclass
+class CustomDataCollator(DataCollatorForLanguageModeling):
+    """Custom collator that handles variable-length sequences with proper padding."""
+    
+    def __call__(self, features):
+        # Extract sequences
+        input_ids = [f["input_ids"] for f in features]
+        labels = [f["labels"] for f in features]
+        
+        # Pad sequences
+        max_len = max(len(ids) for ids in input_ids)
+        
+        padded_input_ids = []
+        padded_labels = []
+        attention_masks = []
+        
+        for ids, lbls in zip(input_ids, labels):
+            pad_len = max_len - len(ids)
+            
+            padded_input_ids.append(ids + [self.tokenizer.pad_token_id] * pad_len)
+            padded_labels.append(lbls + [-100] * pad_len)  # -100 is ignore index
+            attention_masks.append([1] * len(ids) + [0] * pad_len)
+        
+        return {
+            "input_ids": torch.tensor(padded_input_ids, dtype=torch.long),
+            "labels": torch.tensor(padded_labels, dtype=torch.long),
+            "attention_mask": torch.tensor(attention_masks, dtype=torch.long)
+        }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--train-data", required=True, help="Training JSONL file")
@@ -251,8 +295,8 @@ def main():
         desc="Tokenizing validation data"
     )
     
-    # Data collator
-    data_collator = DataCollatorForLanguageModeling(
+    # Custom data collator that preserves -100 labels
+    data_collator = CustomDataCollator(
         tokenizer=tokenizer,
         mlm=False
     )
@@ -304,8 +348,4 @@ def main():
 
 
 if __name__ == "__main__":
-
     main()
-
-
-
