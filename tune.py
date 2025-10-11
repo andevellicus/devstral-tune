@@ -5,7 +5,7 @@ finetune_devstral.py
 QLoRA fine-tuning for Devstral on statistical analysis traces.
 
 Usage:
-    python finetune_devstral.py \
+    python tune.py \
         --train-data organized_traces/splits/train.jsonl \
         --val-data organized_traces/splits/val.jsonl \
         --model-name mistralai/Devstral-small-2505 \
@@ -16,7 +16,7 @@ Usage:
         --gradient-accumulation 8 \
         --max-length 16384 \
         --lora-r 128 \
-        --lora-alpha 16 \/
+        --lora-alpha 16 \
         --use-flash-attention
 """
 
@@ -35,7 +35,8 @@ from transformers import (
     BitsAndBytesConfig,
     TrainingArguments,
     Trainer,
-    DataCollatorForLanguageModeling
+    DataCollatorForLanguageModeling,
+    EarlyStoppingCallback
 )
 
 
@@ -101,6 +102,7 @@ def format_conversation(messages: List[Dict], tokenizer, max_length: int = 8192)
     
     # Truncate if needed
     if len(input_ids) > max_length:
+        print(f"WARNING: Truncating trace from {len(input_ids)} to {max_length} tokens")
         input_ids = input_ids[:max_length]
         labels = labels[:max_length]
     
@@ -314,7 +316,7 @@ def main():
         mlm=False
     )
     
-    # Training arguments
+    # Training arguments - REMOVED invalid early_stopping_* parameters
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
@@ -339,21 +341,27 @@ def main():
         optim="paged_adamw_8bit",
         report_to=["tensorboard"],
         logging_dir=f"{args.output_dir}/logs",
-        early_stopping_patience=2,
-        early_stopping_threshold=0.01,
-        max_grad_norm=1.0
+        max_grad_norm=1.0  # This one is valid and stays
     )
     
-    # Create trainer
+    # Create early stopping callback
+    early_stopping = EarlyStoppingCallback(
+        early_stopping_patience=2,      # Stop if no improvement for 2 evals
+        early_stopping_threshold=0.01   # Minimum improvement required
+    )
+    
+    # Create trainer with early stopping callback
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=tokenized_train,
         eval_dataset=tokenized_val,
-        data_collator=data_collator
+        data_collator=data_collator,
+        callbacks=[early_stopping]  # ADD THE CALLBACK HERE
     )
     
     print("Starting training...")
+    print(f"Early stopping enabled: patience=2, threshold=0.01")
     trainer.train()
     
     print("Saving final model...")
@@ -365,6 +373,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
