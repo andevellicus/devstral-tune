@@ -16,7 +16,7 @@ Usage:
         --gradient-accumulation 8 \
         --max-length 16384 \
         --lora-r 128 \
-        --lora-alpha 16 \
+        --lora-alpha 16 \/
         --use-flash-attention
 """
 
@@ -339,6 +339,8 @@ def main():
         optim="paged_adamw_8bit",
         report_to=["tensorboard"],
         logging_dir=f"{args.output_dir}/logs",
+        early_stopping_patience=2,
+        early_stopping_threshold=0.01,
         max_grad_norm=1.0
     )
     
@@ -363,5 +365,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
