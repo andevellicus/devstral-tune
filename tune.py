@@ -341,7 +341,8 @@ def main():
         optim="paged_adamw_8bit",
         report_to=["tensorboard"],
         logging_dir=f"{args.output_dir}/logs",
-        max_grad_norm=1.0  # This one is valid and stays
+        max_grad_norm=1.0,
+        weight_decay=0.01
     )
     
     # Create early stopping callback
@@ -373,3 +374,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
