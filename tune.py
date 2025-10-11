@@ -338,7 +338,8 @@ def main():
         gradient_checkpointing=True,
         optim="paged_adamw_8bit",
         report_to=["tensorboard"],
-        logging_dir=f"{args.output_dir}/logs"
+        logging_dir=f"{args.output_dir}/logs",
+        max_grad_norm=1.0
     )
     
     # Create trainer
@@ -362,4 +363,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
